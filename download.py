@@ -64,6 +64,7 @@ def main():
     parser.add_argument('--account-id', '-a', required=False, help='Cloudflare account ID (can also set R2_ACCOUNT_ID env var)')
     parser.add_argument('--directory', '-d', default=None, help='Local directory name (defaults to images, can also set R2_DIRECTORY env var)')
     parser.add_argument('--region', '-r', default=None, help='Optional region (can also set R2_REGION env var)')
+    parser.add_argument('--prune-remote', '-p', action='store_true', help='Delete remote objects missing locally')
     args = parser.parse_args()
     # Override with environment variables if not provided via flags
     account_id = args.account_id or os.getenv('R2_ACCOUNT_ID')
@@ -89,19 +90,28 @@ def main():
     remote_keys = set(list_bucket_objects(client, bucket_name))
     local_keys = set(list_local_files(local_dir))
 
+    # Prune-only mode: skip downloads, delete remote objects missing locally
+    if args.prune_remote:
+        to_delete = remote_keys - local_keys
+        if to_delete:
+            print('The following remote objects will be deleted:')
+            for key in sorted(to_delete):
+                print(f'  - {key}')
+            confirm = input('Proceed with deletion? [y/N]: ')
+            if confirm.lower() == 'y':
+                delete_remote_files(client, bucket_name, to_delete)
+            else:
+                print('Aborted remote deletion.')
+        else:
+            print('No remote images to delete.')
+        return
+
     # Download new images
     to_download = remote_keys - local_keys
     if to_download:
         download_new_files(client, bucket_name, to_download, local_dir)
     else:
         print('No new images to download.')
-
-    # Delete images removed locally
-    to_delete = local_keys - remote_keys
-    if to_delete:
-        delete_remote_files(client, bucket_name, to_delete)
-    else:
-        print('No remote images to delete.')
 
 if __name__ == '__main__':
     main()
