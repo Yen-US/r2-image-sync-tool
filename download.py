@@ -11,7 +11,7 @@ load_dotenv(env_path)
 # Supported image extensions
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp')
 
-def get_s3_client(account_id, access_key, secret_key, region=None):
+def get_s3_client(account_id, access_key, secret_key, region="auto"):
     """Return an S3-compatible client for Cloudflare R2."""
     endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
     return boto3.client(
@@ -60,11 +60,20 @@ def delete_remote_files(client, bucket_name, keys):
 
 def main():
     parser = argparse.ArgumentParser(description='Sync images between R2 bucket and local directory')
-    parser.add_argument('--bucket', '-b', required=True, help='R2 bucket name')
-    parser.add_argument('--account-id', '-a', required=True, help='Cloudflare account ID')
-    parser.add_argument('--directory', '-d', default='images', help='Local directory name')
-    parser.add_argument('--region', '-r', default=None, help='Optional region')
+    parser.add_argument('--bucket', '-b', required=False, help='R2 bucket name (can also set R2_BUCKET_NAME env var)')
+    parser.add_argument('--account-id', '-a', required=False, help='Cloudflare account ID (can also set R2_ACCOUNT_ID env var)')
+    parser.add_argument('--directory', '-d', default=None, help='Local directory name (defaults to images, can also set R2_DIRECTORY env var)')
+    parser.add_argument('--region', '-r', default=None, help='Optional region (can also set R2_REGION env var)')
     args = parser.parse_args()
+    # Override with environment variables if not provided via flags
+    account_id = args.account_id or os.getenv('R2_ACCOUNT_ID')
+    bucket_name = args.bucket or os.getenv('R2_BUCKET_NAME')
+    directory = args.directory or os.getenv('R2_DIRECTORY', 'images')
+    region = args.region or os.getenv('R2_REGION')
+    if not account_id:
+        parser.error('Please set R2_ACCOUNT_ID environment variable or supply --account-id')
+    if not bucket_name:
+        parser.error('Please set R2_BUCKET_NAME environment variable or supply --bucket')
 
     access_key = os.getenv('AWS_ACCESS_KEY_ID')
     secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -72,25 +81,25 @@ def main():
         parser.error('Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables')
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    local_dir = os.path.join(base_dir, args.directory)
+    local_dir = os.path.join(base_dir, directory)
     os.makedirs(local_dir, exist_ok=True)
 
-    client = get_s3_client(args.account_id, access_key, secret_key, args.region)
+    client = get_s3_client(account_id, access_key, secret_key, region)
 
-    remote_keys = set(list_bucket_objects(client, args.bucket))
+    remote_keys = set(list_bucket_objects(client, bucket_name))
     local_keys = set(list_local_files(local_dir))
 
     # Download new images
     to_download = remote_keys - local_keys
     if to_download:
-        download_new_files(client, args.bucket, to_download, local_dir)
+        download_new_files(client, bucket_name, to_download, local_dir)
     else:
         print('No new images to download.')
 
     # Delete images removed locally
     to_delete = local_keys - remote_keys
     if to_delete:
-        delete_remote_files(client, args.bucket, to_delete)
+        delete_remote_files(client, bucket_name, to_delete)
     else:
         print('No remote images to delete.')
 
